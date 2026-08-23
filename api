@@ -1,0 +1,207 @@
+local replicatedstorage = game:GetService("ReplicatedStorage")
+
+local success, Rayfield = pcall(function()
+    return loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+end)
+
+if not success or not Rayfield then
+    warn("Rayfield UI โหลดไม่สำเร็จ!")
+end
+
+local bytenet = require(replicatedstorage:WaitForChild("Teawork"):WaitForChild("Shared"):WaitForChild("Services"):WaitForChild("ByteNetworking"))
+
+local api = {}
+
+function api:Loadout(towers: table)
+	if game.PlaceId ~= 98936097545088 then return end
+
+	for i = 1, #towers do
+		bytenet.Inventory.EquipTower.invoke({["TowerID"] = towers[i], ["Slot"] = i})
+		task.wait(0.5)
+	end
+end
+
+function api:Map(map: string, modifiers: table)
+	if game.PlaceId ~= 98936097545088 then return end
+	
+	bytenet.MatchmakingNew.CreateSingleplayer.invoke({["Gamemode"] = "Standard", ["MapID"] = map, ["Modifiers"] = modifiers})
+end
+
+if game.PlaceId ~= 124069847780670 then return api end
+
+local towers = bytenet.Towers
+local mapinfo = replicatedstorage.RoundInfo
+
+local roundresultui = game:GetService("Players").LocalPlayer.PlayerGui.GameUI.RoundResult
+
+local ostime = os.time
+local env = getgenv()
+
+env.StratName = "Strat"
+
+env.timer = 0
+env.lasttime = ostime()
+env.waveinfo = 1
+env.isroundover = false
+
+env.totalplacedtowers = 0
+env.firsttower = 1
+
+env.destroyui = false
+
+local Window = Rayfield:CreateWindow({
+    Name = "Omega Macro",
+    LoadingTitle = "Macro Player",
+    LoadingSubtitle = "Retro Tower Defense",
+    ConfigurationSaving = { Enabled = false },
+    KeySystem = false
+})
+
+local LogTab = Window:CreateTab("Macro Player", 4483362458)
+local FilenameLabel = LogTab:CreateLabel("StratName: " .. env.StratName)
+
+local LogsTab = Window:CreateTab("Logs", 4483362458)
+local LogParagraph = LogsTab:CreateParagraph({Title = "Console Logs", Content = "Waiting for actions..."})
+local LogHistory = {}
+
+local LogLabel = LogTab:CreateLabel("Last Log: Voting")
+
+function updatelog(text: string)
+	pcall(function() setthreadidentity(7) end)
+	local timeString = DateTime.now():FormatLocalTime("HH:mm:ss", "en-us")
+	local newLog = timeString .. ": " .. text
+	
+	table.insert(LogHistory, newLog)
+	if #LogHistory > 15 then
+		table.remove(LogHistory, 1)
+	end
+	
+	LogParagraph:Set({Title = "Console Logs", Content = table.concat(LogHistory, "\n")})
+	LogLabel:Set("Last Log: " .. text)
+end
+
+updatelog("Voting")
+
+function waitTime(time, wave)
+	while waveinfo < wave and not isroundover do
+		task.wait(0.05)
+	end
+	   
+    	while timer < time and not isroundover do
+        	task.wait(0.05)
+    	end
+    	
+    	return not isroundover
+end
+
+function api:Loop(func)
+	if game.PlaceId ~= 124069847780670 then return end 
+	
+	while task.wait(0.03) do				
+		func()
+	end
+end
+
+function api:Start()
+	bytenet.Timescale.SetTimescale.send(2)
+
+	env.waveinfo = mapinfo:GetAttribute("Wave") or 1
+	env.timer = 0
+	
+	mapinfo:GetAttributeChangedSignal("Wave"):Connect(function()
+		env.waveinfo = mapinfo:GetAttribute("Wave")
+	end)
+
+	roundresultui:GetPropertyChangedSignal("Visible"):Connect(function()
+		env.isroundover = roundresultui.Visible
+	end)
+	
+	updatelog("Game Started")
+		
+	task.spawn(function()
+		lasttime = ostime()
+		while env.lasttime do
+			env.timer = (ostime() - env.lasttime) * 2
+			task.wait(0.25)
+		end
+	end)
+end
+
+function api:Difficulty(diff: string)
+	updatelog(string.format("Voted difficulty %s", diff))
+	bytenet.DifficultyVote.Vote.send(diff)
+	
+	while #mapinfo:GetAttribute("Difficulty") == 0 do task.wait(0.05) end 
+	
+	env.lasttime = ostime()
+	env.timer = 0
+	env.waveinfo = 1
+	
+	task.wait(0.1)
+end
+
+function api:Ready(time: number, wave: number)
+	if waitTime(time, wave) then updatelog("Sent ready vote") bytenet.ReadyVote.Vote.send(true) end
+end
+
+function api:Skip(time: number, wave: number)
+	if waitTime(time, wave) then updatelog(string.format("Skipping Wave %d", wave)) replicatedstorage:WaitForChild("ByteNetReliable"):FireServer(buffer.fromstring("\148\001")) end
+end
+
+function api:AutoSkip(enable: number, time: number, wave: number)
+	if waitTime(time, wave) then updatelog(string.format("AutoSkip set to %s", tostring(enable))) bytenet.SkipWave.ToggleAutoSkip.send(enable) end
+end
+
+function api:Place(tower: string, position: Vector3, upvector: Vector3, time: number, wave: number)
+	if waitTime(time, wave) then	
+		env.totalplacedtowers = env.totalplacedtowers + 1
+		
+		updatelog(string.format("Placed Tower %s", tower))
+		towers.PlaceTower.invoke({["Position"] = position, ["UpVector"] = upvector, ["Rotation"] = 0, ["TowerID"] = tower})
+	end
+end
+
+function api:Upgrade(tower: number, time: number, wave: number)
+	if waitTime(time, wave) then
+		updatelog(string.format("Upgraded Tower %d", tower))
+		
+		local realindex = env.firsttower + (tower - 1)
+		towers.UpgradeTower.invoke(realindex)
+	end
+end
+
+function api:SetTarget(tower: number, target: string, time: number, wave: number)
+	if waitTime(time, wave) then
+		updatelog(string.format("Changed Tower %d Target to %s", tower, target))
+	
+		local realindex = env.firsttower + (tower - 1)
+		towers.SetTargetMode.send({["UID"] = (realindex), ["TargetMode"] = target})
+	end
+end
+
+function api:Sell(tower: number, time: number, wave: number)
+	if waitTime(time, wave) then
+		updatelog(string.format("Sold Tower %d", tower)) 
+		
+		local realindex = env.firsttower + (tower - 1)
+		towers.SellTower.invoke(realindex)
+	end
+end
+
+function api:PlayAgain()
+	while not env.isroundover do task.wait(0.1) end
+	
+	env.firsttower = env.totalplacedtowers + 1
+	
+	env.lasttime = ostime()
+	env.timer = 0
+	env.waveinfo = 1
+	
+	task.wait(1)
+	
+	bytenet.RoundResult.VoteForRestart.send(true)
+	updatelog("Voted for restart")
+end
+
+return api
+
